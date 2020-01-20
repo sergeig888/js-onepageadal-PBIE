@@ -1,0 +1,160 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title></title>
+    <script src="https://secure.aadcdn.microsoftonline-p.com/lib/1.0.17/js/adal.min.js"></script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.1/jquery.min.js"></script>
+    <script src="https://cdn.rawgit.com/Microsoft/PowerBI-JavaScript/master/dist/powerbi.min.js"></script>
+    <script>
+
+        //added by SOG on 5/1/18
+        //var mytoken; //NOTE: use to capture AAD token for troubleshooting AAD authentication issues
+
+        window.config = {
+            instance: 'https://login.microsoftonline.com/',
+            tenant: 'common', //COMMON OR YOUR AAD TENANT ID 
+
+            //TODO: replace with your client ID
+            clientId: '[your client app ID]', //This is your client ID
+            //TODO: replace with your redirect URL; make sure to update AAD app registration page
+            redirectUri: 'http://localhost:[your port]/Default.html', //This is your redirect URI
+
+            callback: userSignedIn,
+            popUp: true
+        };
+
+        var ADAL = new AuthenticationContext(config);
+
+        //added by SOG on 5/4/18
+        //critical code fragment; missing in other samples
+        //PBIE embed token retrieval will fail without it
+        var isCallback = ADAL.isCallback(window.location.hash);
+        ADAL.handleWindowCallback();
+
+        function signIn() {
+            ADAL.login();
+        }
+
+        function printErrorMessage(msg) {
+            console.log(msg);
+            //alert(msg);
+        }
+
+        function userSignedIn(err, token) {
+            console.log('userSignedIn called');
+
+            //added by SOG on 5/1/18
+            //mytoken = token; //NOTE: use for troubleshooting of AAD issues
+
+            if (!err) {
+
+                showWelcomeMessage();
+
+                //NOTE: this code will not work without default app manifest modification
+                //see: https://community.dynamics.com/crm/b/akmscrmblog/archive/2016/03/16/response-type-token-is-not-enabled-for-the-application
+
+                ADAL.acquireToken("https://analysis.windows.net/powerbi/api", function (error, token) {
+                    // Handle ADAL Error
+                    if (error || !token) {
+                        printErrorMessage('ADAL Error Occurred: ' + error);
+                        return;
+                    }
+
+                    //displaying token, so can analyse issues in jwt parser
+                    var divToken = document.getElementById('ADALToken');
+                    divToken.value = token;
+
+                    //embed sample report
+                    //try sample REST API call instead if report embedding fails
+                    console.log('EmbedReport called');
+                    EmbedReport(token);
+
+                    //execute sample API call to validate token
+                    console.log('Sample REST API function called');
+                    $.ajax({
+                        type: "GET",
+                        url: "https://api.powerbi.com/v1.0/myorg/availableFeatures(featureName='embedTrial')",
+                        headers: {
+                            'Authorization': 'Bearer ' + token,
+                        },
+                    }).done(function (data) {
+
+                        console.log(data);
+
+                    }).fail(function () {
+
+                        printErrorMessage('Error getting data')
+
+                    }).always(function () {
+                        console.log('Attempted sample API call');
+                    });
+                });
+            }
+
+            else {
+                console.error("error: " + err);
+            }
+        }
+
+        //added by SOG 5/4/2018 to embed a report
+        function EmbedReport(PBIEtoken) {
+
+            //TODO: replace with your report embed URL
+            var embedUrl = "https://app.powerbi.com/reportEmbed?reportId=[your id]&groupId=[your id]";
+
+            //TODO: replace with your report ID
+            var reportId = "[your id]";
+
+            //Get models (models contains enums)
+            var models = window['powerbi-client'].models;
+
+            // Embed configuration is used to describe what and how to embed
+            // This object is used when calling powerbi.embed
+            // It can also include settings and options such as filters
+            // See PBIE client side javascript documentation on GitHub for settings value details
+            var config = {
+                type: 'report',
+                tokenType: models.TokenType.Aad,
+                accessToken: PBIEtoken,
+                embedUrl: embedUrl,
+                id: reportId,
+                settings: {
+                    filterPaneEnabled: true,
+                    navContentPaneEnabled: true,
+                    //layoutType: models.LayoutType.MobilePortrait,
+                    localeSettings: {
+                        language: 'en-us',
+                        formatLocale: 'en-us'
+                    }
+                }
+            };
+
+            // Embed the report within the div element
+            var report = powerbi.embed(embedDiv, config);
+        }
+
+        function showWelcomeMessage() {
+            var user = ADAL.getCachedUser();
+            var divWelcome = document.getElementById('WelcomeMessage');
+            var expDate = new Date(1000 * user.profile.exp);
+
+            divWelcome.innerHTML = "Welcome " + user.profile.name + ", here is your AAD token (expires: " + expDate.toLocaleTimeString() + "):";
+
+            //added by SOG on 5/1/18
+            //can be used to troubleshoot issues with AAD login
+            //var divToken = document.getElementById('ADALToken');
+            //divToken.value = mytoken;
+        }
+    </script>
+</head>
+<body>
+
+    <button id="SignIn" onclick="signIn()">Sign In</button>
+    <h4 id="WelcomeMessage"></h4>
+    <textarea id="ADALToken" wrap="soft" rows="3" style="width:99%;resize:vertical;"></textarea>
+    <hr style="width:99%;" />
+    <div id="embedDiv" style="height: 600px; width: 100%; max-width: 1000px;" />
+
+</body>
+</html>
